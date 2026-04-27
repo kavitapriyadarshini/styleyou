@@ -6,7 +6,6 @@ type StyleQuizPayload = {
   ageRange: string;
   bodyType: string;
   skinTone: string;
-  currentStyle: string;
   lovedColors: string[];
   vibe: string;
   occasions: string[];
@@ -135,7 +134,6 @@ export async function POST(request: Request) {
     !payload.ageRange ||
     !payload.bodyType ||
     !payload.skinTone ||
-    !payload.currentStyle ||
     !payload.vibe?.trim() ||
     !lovedOk ||
     !payload.occasions?.length ||
@@ -176,10 +174,9 @@ Client profile:
 - Age range: ${payload.ageRange}
 - Body type: ${payload.bodyType}
 - Skin tone: ${payload.skinTone}
-- Current style: ${payload.currentStyle}
 - Colours they love wearing: ${loved.join(", ")}
-- Vibe they want: ${payload.vibe.trim()}
-- Occasions: ${payload.occasions.join(", ")}
+- Vibe they want to go for (primary style direction): ${payload.vibe.trim()}
+- Occasions you want to buy for: ${payload.occasions.join(", ")}
 - Budget per outfit in INR: ${payload.budget}
 - Favorite brands: ${payload.brands || "Not specified"}
 

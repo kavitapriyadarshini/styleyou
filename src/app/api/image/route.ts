@@ -147,15 +147,14 @@ function extractColourAndItemName(itemName: string): { colour: string; itemRest:
 function buildRecommendationQuery(params: {
   itemName: string;
   gender: string;
-  style: string;
+  vibe: string;
   occasions: string;
   skinTone: string;
   lovedHint?: string;
-  vibeHint?: string;
 }): string {
   const { colour, itemRest } = extractColourAndItemName(params.itemName);
   const gender = genderSearchToken(params.gender);
-  const style = params.style.trim().toLowerCase();
+  const vibeWords = params.vibe.trim().toLowerCase();
   const occasionPart = params.occasions
     .split(",")
     .map((o) => o.trim().toLowerCase())
@@ -163,17 +162,15 @@ function buildRecommendationQuery(params: {
     .join(" ");
   const skin = skinToneToModifier(params.skinTone);
   const loved = params.lovedHint?.trim().toLowerCase() ?? "";
-  const vibe = params.vibeHint?.trim().toLowerCase() ?? "";
 
   const parts = [
     colour,
     itemRest || params.itemName.trim().toLowerCase(),
     gender,
-    style,
+    vibeWords,
     occasionPart,
     skin,
     loved,
-    vibe,
     "fashion",
     "outfit",
   ].filter(Boolean);
@@ -184,27 +181,24 @@ function buildRecommendationQuery(params: {
 function buildMoodQuery(params: {
   personality: string;
   gender: string;
-  style: string;
+  vibe: string;
   skinTone: string;
   lovedHint?: string;
-  vibeHint?: string;
 }): string {
   const personality = params.personality.trim().toLowerCase();
   const gender = genderSearchToken(params.gender);
-  const style = params.style.trim().toLowerCase();
+  const vibeWords = params.vibe.trim().toLowerCase();
   const skin = skinToneToModifier(params.skinTone);
   const loved = params.lovedHint?.trim().toLowerCase() ?? "";
-  const vibe = params.vibeHint?.trim().toLowerCase() ?? "";
 
   const parts = [
     personality,
     gender,
-    style,
+    vibeWords,
     "fashion",
     "lifestyle",
     skin,
     loved,
-    vibe,
   ].filter(Boolean);
 
   return parts.join(" ").replace(/\s+/g, " ").trim();
@@ -285,19 +279,18 @@ export async function GET(request: Request) {
   if (type === "recommendation") {
     const itemName = searchParams.get("itemName")?.trim();
     const gender = searchParams.get("gender")?.trim();
-    const style = searchParams.get("style")?.trim();
+    const vibe = searchParams.get("vibe")?.trim();
     const occasions = searchParams.get("occasions")?.trim() ?? "";
     const skinTone = searchParams.get("skinTone")?.trim();
 
-    if (!itemName || !gender || !style || !skinTone) {
+    if (!itemName || !gender || !vibe || !skinTone) {
       return NextResponse.json(
-        { error: "Missing itemName, gender, style, or skinTone for recommendation image." },
+        { error: "Missing itemName, gender, vibe, or skinTone for recommendation image." },
         { status: 400 },
       );
     }
 
     const lovedRaw = searchParams.get("lovedColors")?.trim() ?? "";
-    const vibeRaw = searchParams.get("vibe")?.trim() ?? "";
     const lovedHint =
       lovedRaw && !lovedRaw.toLowerCase().includes("no preference")
         ? lovedRaw
@@ -311,29 +304,27 @@ export async function GET(request: Request) {
     searchQuery = buildRecommendationQuery({
       itemName,
       gender,
-      style,
+      vibe,
       occasions,
       skinTone,
       lovedHint,
-      vibeHint: vibeRaw,
     });
   } else if (type === "mood") {
     const personality = searchParams.get("personality")?.trim();
     const gender = searchParams.get("gender")?.trim();
-    const style = searchParams.get("style")?.trim();
+    const vibe = searchParams.get("vibe")?.trim();
     const skinTone = searchParams.get("skinTone")?.trim();
     const slotRaw = searchParams.get("slot");
     slot = Math.max(0, Math.min(4, Number.parseInt(slotRaw ?? "0", 10) || 0));
 
-    if (!personality || !gender || !style || !skinTone) {
+    if (!personality || !gender || !vibe || !skinTone) {
       return NextResponse.json(
-        { error: "Missing personality, gender, style, or skinTone for mood image." },
+        { error: "Missing personality, gender, vibe, or skinTone for mood image." },
         { status: 400 },
       );
     }
 
     const lovedRaw = searchParams.get("lovedColors")?.trim() ?? "";
-    const vibeRaw = searchParams.get("vibe")?.trim() ?? "";
     const lovedHint =
       lovedRaw && !lovedRaw.toLowerCase().includes("no preference")
         ? lovedRaw
@@ -347,10 +338,9 @@ export async function GET(request: Request) {
     searchQuery = buildMoodQuery({
       personality,
       gender,
-      style,
+      vibe,
       skinTone,
       lovedHint,
-      vibeHint: vibeRaw,
     });
   } else {
     const q = searchParams.get("q")?.trim();

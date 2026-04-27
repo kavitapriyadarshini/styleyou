@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
 import Image from "next/image";
 
@@ -30,7 +30,6 @@ type QuizData = {
   ageRange: string;
   bodyType: string;
   skinTone: string;
-  currentStyle: string;
   lovedColors: string[];
   vibe: string;
   occasions: string[];
@@ -130,17 +129,14 @@ const BODY_TYPE_MAN: BodyTypeRow[] = [
 
 const BODY_TYPE_NONBINARY: BodyTypeRow[] = [...BODY_TYPE_WOMAN, ...BODY_TYPE_MAN];
 
-const genderOptions = ["Man", "Woman", "Non-binary"];
+const GENDER_CARDS = [
+  { value: "Woman", icon: "♀", label: "Woman" },
+  { value: "Man", icon: "♂", label: "Man" },
+  { value: "Non-binary", icon: "◈", label: "Non-binary" },
+] as const;
+
 const ageOptions = ["18-24", "25-34", "35-44", "45+"];
 const skinToneOptions = ["Fair", "Wheatish", "Medium", "Dark"];
-const styleOptions = [
-  "Casual",
-  "Formal",
-  "Smart Casual",
-  "Streetwear",
-  "Ethnic",
-  "Mixed",
-];
 const occasionOptions = [
   "Work",
   "Dates",
@@ -150,6 +146,18 @@ const occasionOptions = [
   "Parties",
 ];
 const budgetOptions = ["Under 2000", "2000-5000", "5000-15000", "15000+"];
+
+const analysisStepsDisplay = [
+  "Analysing your style profile...",
+  "Building your wardrobe...",
+  "Creating your style guide...",
+];
+
+const STYLE_TIPS = [
+  "Did you know? Wearing colours that complement your skin tone can make you look 10 years younger.",
+  "Style tip: The right fit matters more than the brand.",
+  "Style tip: One statement piece elevates any outfit.",
+];
 
 function bodyTypeRowsForGender(gender: string): BodyTypeRow[] {
   if (gender === "Woman") return BODY_TYPE_WOMAN;
@@ -165,18 +173,11 @@ function isLovedColorsValid(lovedColors: string[]): boolean {
   return true;
 }
 
-const analysisSteps = [
-  "Analysing your style profile...",
-  "Building your wardrobe recommendations...",
-  "Creating your style guide...",
-];
-
 const initialQuiz: QuizData = {
   gender: "",
   ageRange: "",
   bodyType: "",
   skinTone: "",
-  currentStyle: "",
   lovedColors: [],
   vibe: "",
   occasions: [],
@@ -187,7 +188,7 @@ const initialQuiz: QuizData = {
   imageName: "",
 };
 
-function getGoogleImagesSearchUrl(itemName: string) {
+function getMyntraSearchUrl(itemName: string) {
   const keywordQuery = itemName
     .toLowerCase()
     .replace(/[^a-z0-9\s]/gi, " ")
@@ -195,13 +196,27 @@ function getGoogleImagesSearchUrl(itemName: string) {
     .filter(Boolean)
     .slice(0, 8)
     .join(" ");
-
   const safeQuery = keywordQuery || itemName.trim() || "fashion";
-  return `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(safeQuery)}`;
+  const encoded = encodeURIComponent(safeQuery).replace(/%20/g, "+");
+  return `https://www.myntra.com/search?q=${encoded}`;
+}
+
+function sectionCanAdvance(step: number, quiz: QuizData): boolean {
+  if (step === 1) return Boolean(quiz.gender && quiz.ageRange);
+  if (step === 2) return Boolean(quiz.gender && quiz.bodyType && quiz.budget);
+  if (step === 3)
+    return (
+      isLovedColorsValid(quiz.lovedColors) &&
+      Boolean(quiz.vibe) &&
+      quiz.occasions.length > 0
+    );
+  if (step === 4) return Boolean(quiz.skinTone);
+  return false;
 }
 
 export default function Home() {
   const [quiz, setQuiz] = useState<QuizData>(initialQuiz);
+  const [quizStep, setQuizStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [activeAgentStep, setActiveAgentStep] = useState(0);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
@@ -209,6 +224,9 @@ export default function Home() {
   const [skinToneDetectedMessage, setSkinToneDetectedMessage] = useState<string | null>(
     null,
   );
+  const [tipIndex, setTipIndex] = useState(0);
+  const [shareCopied, setShareCopied] = useState(false);
+  const quizSectionRef = useRef<HTMLDivElement>(null);
 
   const bodyTypeRows = useMemo(() => bodyTypeRowsForGender(quiz.gender), [quiz.gender]);
 
@@ -217,7 +235,6 @@ export default function Home() {
     Boolean(quiz.ageRange) &&
     Boolean(quiz.bodyType) &&
     Boolean(quiz.skinTone) &&
-    Boolean(quiz.currentStyle) &&
     Boolean(quiz.vibe) &&
     isLovedColorsValid(quiz.lovedColors) &&
     Boolean(quiz.budget) &&
@@ -310,7 +327,7 @@ export default function Home() {
         }
       }
     } catch {
-      /* optional detection */
+      /* optional */
     }
   };
 
@@ -323,6 +340,15 @@ export default function Home() {
       clearTimeout(second);
     };
   };
+
+  useEffect(() => {
+    if (!isLoading) return;
+    setTipIndex(0);
+    const id = setInterval(() => {
+      setTipIndex((i) => (i + 1) % STYLE_TIPS.length);
+    }, 3000);
+    return () => clearInterval(id);
+  }, [isLoading]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -399,7 +425,7 @@ export default function Home() {
     addHeading("Wardrobe Recommendations");
     analysis.recommendations.forEach((item, index) => {
       addParagraph(
-        `${index + 1}. ${item.itemName}\nWhy it works: ${item.whyItWorks}\nStyling tip: ${item.stylingTip}\nGoogle Images: ${getGoogleImagesSearchUrl(item.itemName)}`,
+        `${index + 1}. ${item.itemName}\nWhy it works: ${item.whyItWorks}\nStyling tip: ${item.stylingTip}\nMyntra: ${getMyntraSearchUrl(item.itemName)}`,
       );
     });
 
@@ -413,264 +439,432 @@ export default function Home() {
     doc.save("styleyou-style-guide.pdf");
   };
 
+  const scrollToQuiz = () => {
+    quizSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const handleShare = async () => {
+    const base =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : process.env.NEXT_PUBLIC_SITE_URL ?? "";
+    const text = `I just got my personal AI style guide from StyleYou — it matched recommendations to my body type and skin tone. Try it free: ${base || "https://styleyou.vercel.app"}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2500);
+    } catch {
+      setShareCopied(false);
+    }
+  };
+
+  const cardHover =
+    "transition-transform duration-300 ease-out hover:scale-[1.02] hover:shadow-md";
+
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-8 text-foreground sm:px-8">
-      <section className="mb-10 rounded-3xl bg-card p-6 shadow-sm ring-1 ring-[#e8ddd2] sm:p-10">
-        <p className="mb-4 inline-flex rounded-full bg-accent-soft px-4 py-1 text-sm font-medium text-[#7a5a3f]">
-          AI-powered personal stylist
-        </p>
-        <h1 className="mb-3 text-4xl leading-tight sm:text-5xl">StyleYou</h1>
-        <p className="max-w-2xl text-muted">
-          Discover your signature wardrobe with quiz-based personalization,
-          Claude-powered style analysis, and a downloadable style guide.
-        </p>
-      </section>
+    <main className="min-h-screen bg-background text-foreground">
+      {!analysis && (
+        <section className="relative overflow-hidden px-4 pb-16 pt-12 sm:px-8 sm:pb-24 sm:pt-16">
+          <div className="mx-auto max-w-3xl text-center">
+            <p className="mb-4 font-sans text-xs font-medium uppercase tracking-[0.2em] text-accent">
+              StyleYou
+            </p>
+            <h1 className="mb-4 text-4xl leading-tight tracking-tight text-accent-dark sm:text-5xl md:text-6xl">
+              Your Personal AI Stylist
+            </h1>
+            <p className="mx-auto mb-10 max-w-xl font-sans text-lg text-muted">
+              Answer 8 questions. Get a wardrobe built for your body, skin tone, and style.
+            </p>
+            <button
+              type="button"
+              onClick={scrollToQuiz}
+              className="inline-flex items-center gap-2 rounded-full bg-accent px-8 py-3.5 font-sans text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:brightness-105"
+            >
+              Start My Style Quiz →
+            </button>
+            <div className="mt-10 flex flex-wrap items-center justify-center gap-2">
+              {[
+                "Personalised for your body type",
+                "Colour-matched to your skin tone",
+                "Shop directly on Myntra",
+              ].map((t) => (
+                <span
+                  key={t}
+                  className="rounded-full border border-accent/30 bg-card px-4 py-2 font-sans text-xs text-muted"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {!analysis && (
-        <form
-          onSubmit={handleSubmit}
-          className="rounded-3xl bg-card p-6 shadow-sm ring-1 ring-[#e8ddd2] sm:p-10"
-        >
-          <h2 className="mb-6 text-3xl">Step 1 - Style Quiz</h2>
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            <SelectField
-              label="Gender"
-              value={quiz.gender}
-              options={genderOptions}
-              onChange={handleGenderChange}
-            />
-            <SelectField
-              label="Age range"
-              value={quiz.ageRange}
-              options={ageOptions}
-              onChange={(value) => handleInput("ageRange", value)}
-            />
-          </div>
+        <div ref={quizSectionRef} id="style-quiz" className="mx-auto max-w-3xl px-4 pb-16 sm:px-8">
+          <form
+            onSubmit={handleSubmit}
+            className="rounded-3xl border border-accent/15 bg-card p-6 shadow-xl shadow-accent-dark/5 sm:p-10"
+          >
+            <div className="mb-8">
+              <div className="mb-2 flex items-center justify-between font-sans text-sm text-muted">
+                <span>
+                  Step {quizStep} of 4
+                </span>
+                <span>{Math.round((quizStep / 4) * 100)}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-accent-soft">
+                <div
+                  className="h-full rounded-full bg-accent transition-all duration-500 ease-out"
+                  style={{ width: `${(quizStep / 4) * 100}%` }}
+                />
+              </div>
+            </div>
 
-          <div className="mt-6">
-            <p className="mb-2 text-sm font-medium text-[#4f3d2f]">Body type</p>
-            {!quiz.gender ? (
-              <p className="text-sm text-muted">Select gender first to see body type options.</p>
-            ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {bodyTypeRows.map((row) => {
-                  const active = quiz.bodyType === row.value;
-                  return (
-                    <button
-                      key={row.value}
-                      type="button"
-                      onClick={() => handleInput("bodyType", row.value)}
-                      className={`rounded-xl border p-3 text-left text-sm transition ${
-                        active
-                          ? "border-accent bg-accent-soft ring-1 ring-accent"
-                          : "border-[#d8c8b8] bg-white hover:border-[#c4b5a8]"
-                      }`}
-                    >
-                      <span className="font-medium text-[#3d2f26]">{row.title}</span>
-                      <span className="mt-1 block text-xs leading-snug text-muted">
-                        {row.helper}
-                      </span>
-                    </button>
-                  );
-                })}
+            <h2 className="mb-8 text-center text-2xl text-accent-dark sm:text-3xl">
+              Style quiz
+            </h2>
+
+            {quizStep === 1 && (
+              <div key="s1" className="animate-section-in space-y-10">
+                <div>
+                  <p className="mb-4 font-sans text-sm font-medium text-accent-dark">Gender</p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    {GENDER_CARDS.map((g) => {
+                      const active = quiz.gender === g.value;
+                      return (
+                        <button
+                          key={g.value}
+                          type="button"
+                          onClick={() => handleGenderChange(g.value)}
+                          className={`flex flex-col items-center rounded-2xl border-2 p-6 text-center ${cardHover} ${
+                            active
+                              ? "border-accent bg-accent-soft shadow-inner"
+                              : "border-transparent bg-accent-soft/40 ring-1 ring-accent/10"
+                          }`}
+                        >
+                          <span className="text-3xl">{g.icon}</span>
+                          <span className="mt-2 font-sans text-sm font-semibold text-accent-dark">
+                            {g.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-3 font-sans text-sm font-medium text-accent-dark">Age range</p>
+                  <div className="flex flex-wrap gap-2">
+                    {ageOptions.map((age) => {
+                      const active = quiz.ageRange === age;
+                      return (
+                        <button
+                          key={age}
+                          type="button"
+                          onClick={() => handleInput("ageRange", age)}
+                          className={`rounded-full border-2 px-4 py-2.5 font-sans text-sm transition ${
+                            active
+                              ? "scale-105 border-accent bg-accent text-white"
+                              : "border-accent/20 bg-background text-foreground hover:border-accent/40"
+                          }`}
+                        >
+                          {age}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
-          </div>
 
-          <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
-            <SelectField
-              label="Current style description"
-              value={quiz.currentStyle}
-              options={styleOptions}
-              onChange={(value) => handleInput("currentStyle", value)}
-            />
-            <SelectField
-              label="Budget per outfit in INR"
-              value={quiz.budget}
-              options={budgetOptions}
-              onChange={(value) => handleInput("budget", value)}
-            />
-          </div>
+            {quizStep === 2 && (
+              <div key="s2" className="animate-section-in space-y-10">
+                <div>
+                  <p className="mb-4 font-sans text-sm font-medium text-accent-dark">Body type</p>
+                  {!quiz.gender ? (
+                    <p className="font-sans text-sm text-muted">Select gender in step 1 first.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {bodyTypeRows.map((row) => {
+                        const active = quiz.bodyType === row.value;
+                        return (
+                          <button
+                            key={row.value}
+                            type="button"
+                            onClick={() => handleInput("bodyType", row.value)}
+                            className={`rounded-2xl border-2 p-4 text-left ${cardHover} ${
+                              active
+                                ? "border-accent bg-accent-soft shadow-md"
+                                : "border-accent/15 bg-background ring-1 ring-accent/10"
+                            }`}
+                          >
+                            <span className="font-sans text-sm font-semibold text-accent-dark">
+                              {row.title}
+                            </span>
+                            <span className="mt-1 block font-sans text-xs leading-snug text-muted">
+                              {row.helper}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <p className="mb-3 font-sans text-sm font-medium text-accent-dark">
+                    Budget per outfit (INR)
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {budgetOptions.map((b) => {
+                      const active = quiz.budget === b;
+                      return (
+                        <button
+                          key={b}
+                          type="button"
+                          onClick={() => handleInput("budget", b)}
+                          className={`rounded-full border-2 px-4 py-2.5 font-sans text-sm transition ${
+                            active
+                              ? "scale-105 border-accent bg-accent text-white"
+                              : "border-accent/20 bg-background hover:border-accent/40"
+                          }`}
+                        >
+                          {b}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
 
-          <div className="mt-6">
-            <p className="mb-1 text-sm font-medium text-[#4f3d2f]">
-              Colours you love wearing
-            </p>
-            <p className="mb-3 text-xs text-muted">
-              Pick up to 5, or only &quot;No preference&quot;. {quiz.lovedColors.length}/5 selected
-            </p>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {LOVED_COLOR_OPTIONS.map((color) => {
-                const active = quiz.lovedColors.includes(color);
-                const disabledNoPref =
-                  color !== "No preference" &&
-                  quiz.lovedColors.includes("No preference");
-                const disabledMax =
-                  color !== "No preference" &&
-                  !active &&
-                  quiz.lovedColors.length >= 5 &&
-                  !quiz.lovedColors.includes("No preference");
-                return (
-                  <button
-                    key={color}
-                    type="button"
-                    disabled={disabledNoPref || disabledMax}
-                    onClick={() => handleLovedColorToggle(color)}
-                    className={`rounded-xl border px-3 py-2.5 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                      active
-                        ? "border-accent bg-accent text-white"
-                        : "border-[#d8c8b8] bg-white text-[#4a3d34]"
-                    }`}
-                  >
-                    {color}
-                  </button>
-                );
-              })}
+            {quizStep === 3 && (
+              <div key="s3" className="animate-section-in space-y-10">
+                <div>
+                  <p className="mb-1 font-sans text-sm font-medium text-accent-dark">
+                    Colours you love wearing
+                  </p>
+                  <p className="mb-3 font-sans text-xs text-muted">
+                    Pick up to 5, or only &quot;No preference&quot;. {quiz.lovedColors.length}/5
+                  </p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {LOVED_COLOR_OPTIONS.map((color) => {
+                      const active = quiz.lovedColors.includes(color);
+                      const disabledNoPref =
+                        color !== "No preference" &&
+                        quiz.lovedColors.includes("No preference");
+                      const disabledMax =
+                        color !== "No preference" &&
+                        !active &&
+                        quiz.lovedColors.length >= 5 &&
+                        !quiz.lovedColors.includes("No preference");
+                      return (
+                        <button
+                          key={color}
+                          type="button"
+                          disabled={disabledNoPref || disabledMax}
+                          onClick={() => handleLovedColorToggle(color)}
+                          className={`rounded-xl border-2 px-3 py-2.5 text-left font-sans text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            active
+                              ? "animate-pop border-accent bg-accent text-white"
+                              : "border-accent/15 bg-background hover:border-accent/30"
+                          }`}
+                        >
+                          {color}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-3 font-sans text-sm font-medium text-accent-dark">
+                    Vibe you want to go for
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {VIBE_OPTIONS.map((v) => {
+                      const active = quiz.vibe === v;
+                      return (
+                        <button
+                          key={v}
+                          type="button"
+                          onClick={() => handleInput("vibe", v)}
+                          className={`rounded-full border-2 px-3 py-2 font-sans text-sm transition ${
+                            active
+                              ? "scale-105 border-accent bg-accent text-white"
+                              : "border-accent/15 bg-background hover:border-accent/30"
+                          }`}
+                        >
+                          {v}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-3 font-sans text-sm font-medium text-accent-dark">
+                    Occasions you want to buy for
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {occasionOptions.map((occasion) => {
+                      const active = quiz.occasions.includes(occasion);
+                      return (
+                        <button
+                          key={occasion}
+                          type="button"
+                          onClick={() => handleOccasionToggle(occasion)}
+                          className={`rounded-full border-2 px-3 py-2 font-sans text-sm transition ${
+                            active
+                              ? "border-accent bg-accent text-white"
+                              : "border-accent/15 bg-background hover:border-accent/30"
+                          }`}
+                        >
+                          {occasion}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {quizStep === 4 && (
+              <div key="s4" className="animate-section-in space-y-8">
+                <label className="block">
+                  <span className="mb-2 block font-sans text-sm font-medium text-accent-dark">
+                    Brands you like (optional)
+                  </span>
+                  <input
+                    value={quiz.brands}
+                    onChange={(event) => handleInput("brands", event.target.value)}
+                    className="w-full rounded-2xl border border-accent/20 bg-background px-4 py-3 font-sans text-sm outline-none ring-accent/30 focus:ring-2"
+                    placeholder="e.g. H&M, Zara, FabIndia"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-2 block font-sans text-sm font-medium text-accent-dark">
+                    Photo (optional)
+                  </span>
+                  <p className="mb-2 font-sans text-xs text-muted">
+                    We can suggest skin tone from your photo.
+                  </p>
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg,.png,.webp"
+                    onChange={handleImageUpload}
+                    className="w-full rounded-2xl border border-accent/20 bg-background px-4 py-3 font-sans text-sm file:mr-4 file:rounded-lg file:border-0 file:bg-accent-soft file:px-3 file:py-1 file:font-medium file:text-accent-dark"
+                  />
+                  {quiz.imageName ? (
+                    <p className="mt-2 font-sans text-xs text-muted">Uploaded: {quiz.imageName}</p>
+                  ) : null}
+                </label>
+                <div>
+                  <p className="mb-3 font-sans text-sm font-medium text-accent-dark">Skin tone</p>
+                  <div className="flex flex-wrap gap-2">
+                    {skinToneOptions.map((tone) => {
+                      const active = quiz.skinTone === tone;
+                      return (
+                        <button
+                          key={tone}
+                          type="button"
+                          onClick={() => {
+                            setSkinToneDetectedMessage(null);
+                            handleInput("skinTone", tone);
+                          }}
+                          className={`rounded-full border-2 px-4 py-2 font-sans text-sm transition ${
+                            active
+                              ? "border-accent bg-accent text-white"
+                              : "border-accent/15 bg-background hover:border-accent/30"
+                          }`}
+                        >
+                          {tone}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {skinToneDetectedMessage ? (
+                    <p className="mt-3 rounded-xl bg-accent-soft px-3 py-2 font-sans text-xs text-accent-dark">
+                      {skinToneDetectedMessage}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            )}
+
+            {error ? <p className="mt-6 font-sans text-sm text-red-600">{error}</p> : null}
+
+            <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:justify-between">
+              {quizStep > 1 ? (
+                <button
+                  type="button"
+                  onClick={() => setQuizStep((s) => Math.max(1, s - 1))}
+                  className="order-2 rounded-full border-2 border-accent/30 px-6 py-3 font-sans text-sm font-medium text-accent-dark transition hover:bg-accent-soft sm:order-1"
+                >
+                  ← Back
+                </button>
+              ) : (
+                <span className="hidden sm:block sm:w-28" />
+              )}
+              {quizStep < 4 ? (
+                <button
+                  type="button"
+                  disabled={!sectionCanAdvance(quizStep, quiz)}
+                  onClick={() => setQuizStep((s) => Math.min(4, s + 1))}
+                  className="order-1 rounded-full bg-accent px-8 py-3 font-sans text-sm font-semibold text-white shadow-md transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40 sm:order-2 sm:ml-auto"
+                >
+                  Continue →
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!canSubmit || isLoading}
+                  className="order-1 rounded-full bg-accent px-8 py-3 font-sans text-sm font-semibold text-white shadow-md transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40 sm:order-2 sm:ml-auto"
+                >
+                  {isLoading ? "Generating…" : "Generate My Style Guide"}
+                </button>
+              )}
             </div>
-          </div>
-
-          <div className="mt-6">
-            <p className="mb-2 text-sm font-medium text-[#4f3d2f]">Vibe you want to go for</p>
-            <div className="flex flex-wrap gap-2">
-              {VIBE_OPTIONS.map((vibe) => {
-                const active = quiz.vibe === vibe;
-                return (
-                  <button
-                    key={vibe}
-                    type="button"
-                    onClick={() => handleInput("vibe", vibe)}
-                    className={`rounded-full border px-3 py-2 text-left text-sm transition ${
-                      active
-                        ? "border-accent bg-accent text-white"
-                        : "border-[#d8c8b8] bg-white text-[#4a3d34]"
-                    }`}
-                  >
-                    {vibe}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-6">
-            <p className="mb-2 text-sm font-medium text-[#4f3d2f]">
-              Occasions they dress for
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {occasionOptions.map((occasion) => {
-                const active = quiz.occasions.includes(occasion);
-                return (
-                  <button
-                    key={occasion}
-                    type="button"
-                    onClick={() => handleOccasionToggle(occasion)}
-                    className={`rounded-full border px-3 py-1.5 text-sm transition ${
-                      active
-                        ? "border-accent bg-accent text-white"
-                        : "border-[#d8c8b8] bg-white text-[#6a584b]"
-                    }`}
-                  >
-                    {occasion}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <label className="mt-6 block">
-            <span className="mb-2 block text-sm font-medium text-[#4f3d2f]">
-              Brands they like (optional)
-            </span>
-            <input
-              value={quiz.brands}
-              onChange={(event) => handleInput("brands", event.target.value)}
-              className="w-full rounded-xl border border-[#d8c8b8] bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-accent-soft"
-              placeholder="e.g. H&M, Zara, FabIndia"
-            />
-          </label>
-
-          <label className="mt-6 block">
-            <span className="mb-2 block text-sm font-medium text-[#4f3d2f]">
-              One photo upload (optional)
-            </span>
-            <p className="mb-2 text-xs text-muted">
-              We can suggest skin tone from your photo — you can still change it below.
-            </p>
-            <input
-              type="file"
-              accept=".jpg,.jpeg,.png,.webp"
-              onChange={handleImageUpload}
-              className="w-full rounded-xl border border-[#d8c8b8] bg-white px-4 py-3 text-sm"
-            />
-            {quiz.imageName ? (
-              <p className="mt-2 text-sm text-muted">Uploaded: {quiz.imageName}</p>
-            ) : null}
-          </label>
-
-          <div className="mt-6 max-w-md">
-            <SelectField
-              label="Skin tone"
-              value={quiz.skinTone}
-              options={skinToneOptions}
-              onChange={(value) => {
-                setSkinToneDetectedMessage(null);
-                handleInput("skinTone", value);
-              }}
-            />
-            {skinToneDetectedMessage ? (
-              <p className="mt-2 rounded-lg bg-accent-soft px-3 py-2 text-xs text-[#5c4330]">
-                {skinToneDetectedMessage}
-              </p>
-            ) : null}
-          </div>
-
-          {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
-
-          <button
-            type="submit"
-            disabled={!canSubmit || isLoading}
-            className="mt-8 w-full rounded-2xl bg-accent px-6 py-3 font-medium text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-          >
-            {isLoading ? "Generating your style guide..." : "Generate My Style Guide"}
-          </button>
-        </form>
+          </form>
+        </div>
       )}
 
       {isLoading && (
-        <section className="mt-8 rounded-3xl bg-card p-6 shadow-sm ring-1 ring-[#e8ddd2] sm:p-10">
-          <h2 className="mb-6 text-3xl">Step 2 - AI Style Analysis</h2>
-          <div className="space-y-4">
-            {analysisSteps.map((step, index) => {
+        <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-background/95 px-6 backdrop-blur-md">
+          <div className="pulse-gold mb-10 h-24 w-24 rounded-full bg-accent/30 ring-4 ring-accent/40 ring-offset-4 ring-offset-background" />
+          <h2 className="mb-2 text-center text-2xl text-accent-dark">Crafting your guide</h2>
+          <div className="mb-10 w-full max-w-md space-y-4">
+            {analysisStepsDisplay.map((step, index) => {
               const done = index < activeAgentStep;
               const active = index === activeAgentStep;
               return (
                 <div
                   key={step}
-                  className={`flex items-center gap-3 rounded-xl border p-4 transition ${
-                    active
-                      ? "border-accent bg-accent-soft"
-                      : "border-[#e8ddd2] bg-white"
+                  className={`flex items-center gap-3 rounded-2xl border-2 px-4 py-3 font-sans text-sm transition ${
+                    active ? "border-accent bg-accent-soft" : "border-accent/10 bg-card"
                   }`}
                 >
                   <span
-                    className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-sm ${
-                      done || active
-                        ? "bg-accent text-white"
-                        : "bg-[#e8ddd2] text-[#6f5d4e]"
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                      done ? "bg-accent text-white" : active ? "bg-accent text-white" : "bg-accent-soft text-muted"
                     }`}
                   >
                     {done ? "✓" : index + 1}
                   </span>
-                  <p className="text-sm sm:text-base">{step}</p>
+                  <span className={done || active ? "text-accent-dark" : "text-muted"}>{step}</span>
                 </div>
               );
             })}
           </div>
-        </section>
+          <p className="max-w-md text-center font-sans text-sm italic text-muted transition-opacity duration-500">
+            {STYLE_TIPS[tipIndex]}
+          </p>
+        </div>
       )}
 
       {analysis && (
-        <section className="mt-8 space-y-6">
+        <section className="mx-auto max-w-6xl space-y-10 px-4 pb-20 pt-10 sm:px-8">
+          <h2 className="text-center text-3xl text-accent-dark sm:text-4xl">
+            Your style personality is ready ✨
+          </h2>
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {[0, 1, 2].map((slot) => (
               <PexelsImage
@@ -678,75 +872,77 @@ export default function Home() {
                 variant="mood"
                 personality={analysis.stylePersonalityName}
                 gender={quiz.gender}
-                currentStyle={quiz.currentStyle}
                 skinTone={quiz.skinTone}
                 lovedColors={quiz.lovedColors}
                 vibe={quiz.vibe}
                 slot={slot}
                 alt={`${analysis.stylePersonalityName} mood board ${slot + 1}`}
                 imageClassName="h-[180px] w-full rounded-2xl object-cover sm:h-[200px]"
-                placeholderClassName="h-[180px] w-full rounded-2xl bg-[#ddd5ce] sm:h-[200px]"
+                placeholderClassName="h-[180px] w-full rounded-2xl bg-accent-soft sm:h-[200px]"
               />
             ))}
           </div>
 
-          <div className="rounded-3xl bg-card p-6 shadow-sm ring-1 ring-[#e8ddd2] sm:p-10">
-            <h2 className="text-3xl">Step 3 - Your Style Results</h2>
-            <p className="mt-3 text-lg font-semibold text-accent">
+          <div className="rounded-3xl border border-accent/10 bg-card p-8 text-center shadow-lg">
+            <h3 className="text-3xl font-semibold text-accent-dark sm:text-4xl">
               {analysis.stylePersonalityName}
+            </h3>
+            <p className="mx-auto mt-4 max-w-2xl font-sans text-muted">
+              {analysis.stylePersonalityDescription}
             </p>
-            <p className="mt-2 text-muted">{analysis.stylePersonalityDescription}</p>
           </div>
 
-          <div className="rounded-3xl bg-card p-6 shadow-sm ring-1 ring-[#e8ddd2] sm:p-10">
-            <h3 className="text-2xl">3 Style Gaps to Fix</h3>
-            <ul className="mt-4 list-disc space-y-2 pl-6 text-muted">
+          <div className="rounded-3xl border border-accent/10 bg-card p-8 shadow-lg">
+            <h3 className="text-2xl text-accent-dark">Style gaps to fix</h3>
+            <ul className="mt-6 space-y-3 font-sans text-muted">
               {analysis.styleGaps.map((gap) => (
-                <li key={gap}>{gap}</li>
+                <li key={gap} className="flex gap-2">
+                  <span className="text-accent">•</span>
+                  <span>{gap}</span>
+                </li>
               ))}
             </ul>
           </div>
 
-          <div className="rounded-3xl bg-card p-6 shadow-sm ring-1 ring-[#e8ddd2] sm:p-10">
-            <h3 className="text-2xl">6 Wardrobe Recommendations</h3>
-            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {analysis.recommendations.map((item) => (
+          <div>
+            <h3 className="mb-6 text-2xl text-accent-dark">Wardrobe picks</h3>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {analysis.recommendations.map((item, idx) => (
                 <article
                   key={item.itemName}
-                  className="flex h-full flex-col overflow-hidden rounded-2xl border border-[#e8ddd2] bg-white"
+                  className={`animate-result-card flex h-full flex-col overflow-hidden rounded-2xl border border-accent/10 bg-card shadow-md ${cardHover}`}
+                  style={{ animationDelay: `${idx * 100}ms` }}
                 >
                   <PexelsImage
                     variant="recommendation"
                     itemName={item.itemName}
                     gender={quiz.gender}
-                    currentStyle={quiz.currentStyle}
                     occasions={quiz.occasions}
                     skinTone={quiz.skinTone}
                     lovedColors={quiz.lovedColors}
                     vibe={quiz.vibe}
-                    alt={`Style reference for ${item.itemName}`}
-                    imageClassName="h-[200px] w-full rounded-t-2xl object-cover"
-                    placeholderClassName="h-[200px] w-full rounded-t-2xl bg-[#ddd5ce]"
+                    alt={item.itemName}
+                    imageClassName="h-[200px] w-full object-cover"
+                    placeholderClassName="h-[200px] w-full bg-accent-soft"
                   />
-                  <div className="flex flex-1 flex-col p-4">
-                    <h4 className="text-xl">{item.itemName}</h4>
-                    <p className="mt-2 text-sm text-muted">{item.whyItWorks}</p>
-                    <p className="mt-2 text-sm">
-                      <span className="font-medium">Styling tip:</span>{" "}
-                      {item.stylingTip}
+                  <div className="flex flex-1 flex-col p-5">
+                    <h4 className="text-lg text-accent-dark">{item.itemName}</h4>
+                    <p className="mt-3 font-sans text-[10px] font-bold uppercase tracking-widest text-accent">
+                      Why this works for you
                     </p>
-                    <div className="mt-auto pt-4">
+                    <p className="mt-2 font-sans text-sm text-muted">{item.whyItWorks}</p>
+                    <blockquote className="mt-4 border-l-4 border-accent pl-4 font-sans text-sm italic text-accent-dark/90">
+                      {item.stylingTip}
+                    </blockquote>
+                    <div className="mt-auto pt-6">
                       <a
-                        href={getGoogleImagesSearchUrl(item.itemName)}
+                        href={getMyntraSearchUrl(item.itemName)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-block rounded-xl bg-accent px-4 py-2 text-sm text-white"
+                        className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 font-sans text-sm font-semibold text-white transition hover:brightness-105"
                       >
-                        Browse on Google Images →
+                        Browse on Myntra →
                       </a>
-                      <p className="mt-2 text-xs text-muted">
-                        Opens Google Images for this item (from your style profile)
-                      </p>
                     </div>
                   </div>
                 </article>
@@ -754,68 +950,47 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="rounded-3xl bg-card p-6 shadow-sm ring-1 ring-[#e8ddd2] sm:p-10">
-            <h3 className="text-2xl">3 Outfit Combinations</h3>
-            <div className="mt-5 space-y-4">
+          <div className="rounded-3xl border border-accent/10 bg-card p-8 shadow-lg">
+            <h3 className="text-2xl text-accent-dark">Outfit combinations</h3>
+            <div className="mt-6 space-y-5">
               {analysis.outfitCombinations.map((look) => (
                 <article
                   key={look.title}
-                  className="rounded-2xl border border-[#e8ddd2] bg-white p-4"
+                  className="rounded-2xl border border-accent/10 bg-background p-5"
                 >
-                  <h4 className="text-xl">{look.title}</h4>
-                  <p className="mt-2 text-sm font-medium text-[#5f4b3a]">
-                    {look.occasionContext}
-                  </p>
-                  <p className="mt-2 text-sm text-muted">{look.outfitDetails}</p>
+                  <h4 className="text-lg text-accent-dark">{look.title}</h4>
+                  <p className="mt-2 font-sans text-sm font-medium text-accent">{look.occasionContext}</p>
+                  <p className="mt-2 font-sans text-sm text-muted">{look.outfitDetails}</p>
                 </article>
               ))}
             </div>
           </div>
 
-          <button
-            onClick={handleDownloadPdf}
-            className="w-full rounded-2xl bg-accent px-6 py-3 font-medium text-white transition hover:brightness-95 sm:w-auto"
-          >
-            Download My Style Guide
-          </button>
+          <div className="rounded-3xl border border-accent/15 bg-accent-soft/50 p-8 text-center">
+            <h3 className="text-2xl text-accent-dark">Love your style guide?</h3>
+            <p className="mx-auto mt-2 max-w-md font-sans text-sm text-muted">
+              Save it or tell a friend — spreading good style is always in fashion.
+            </p>
+            <div className="mt-8 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:gap-4">
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                className="rounded-full border-2 border-accent bg-card px-8 py-3 font-sans text-sm font-semibold text-accent-dark transition hover:bg-accent-soft"
+              >
+                Download Style Guide
+              </button>
+              <button
+                type="button"
+                onClick={handleShare}
+                className="rounded-full bg-accent px-8 py-3 font-sans text-sm font-semibold text-white transition hover:brightness-105"
+              >
+                {shareCopied ? "Copied!" : "Share StyleYou with a friend"}
+              </button>
+            </div>
+          </div>
         </section>
       )}
     </main>
-  );
-}
-
-type SelectFieldProps = {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (value: string) => void;
-  disabled?: boolean;
-};
-
-function SelectField({
-  label,
-  value,
-  options,
-  onChange,
-  disabled = false,
-}: SelectFieldProps) {
-  return (
-    <label className="block">
-      <span className="mb-2 block text-sm font-medium text-[#4f3d2f]">{label}</span>
-      <select
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-[#d8c8b8] bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-accent-soft disabled:cursor-not-allowed disabled:bg-[#f2ece6]"
-      >
-        <option value="">{disabled ? "Select gender first" : "Select one"}</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }
 
@@ -840,7 +1015,6 @@ type PexelsImageProps =
       variant: "recommendation";
       itemName: string;
       gender: string;
-      currentStyle: string;
       occasions: string[];
       skinTone: string;
       lovedColors: string[];
@@ -853,7 +1027,6 @@ type PexelsImageProps =
       variant: "mood";
       personality: string;
       gender: string;
-      currentStyle: string;
       skinTone: string;
       lovedColors: string[];
       vibe: string;
@@ -869,7 +1042,6 @@ function buildPexelsImageRequestUrl(props: PexelsImageProps): string {
       type: "recommendation",
       itemName: props.itemName,
       gender: props.gender,
-      style: props.currentStyle,
       occasions: props.occasions.join(","),
       skinTone: props.skinTone,
       lovedColors: props.lovedColors.join(","),
@@ -881,7 +1053,6 @@ function buildPexelsImageRequestUrl(props: PexelsImageProps): string {
     type: "mood",
     personality: props.personality,
     gender: props.gender,
-    style: props.currentStyle,
     skinTone: props.skinTone,
     lovedColors: props.lovedColors.join(","),
     vibe: props.vibe,
