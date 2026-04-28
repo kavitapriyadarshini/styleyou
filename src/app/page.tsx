@@ -512,6 +512,12 @@ export default function Home() {
               Answer a few questions. Get personalised style recommendations matched to your body,
               skin tone, and budget — for free.
             </p>
+            <p
+              className="mb-5 text-[13px] italic"
+              style={{ color: "#8B8B8B", fontFamily: "var(--font-playfair), 'Playfair Display', serif" }}
+            >
+              Crafted by Kavita Priyadarshini
+            </p>
             <button
               type="button"
               onClick={scrollToQuiz}
@@ -1035,6 +1041,19 @@ export default function Home() {
           </div>
         </section>
       )}
+      <footer className="px-4 pb-8 pt-2 text-center sm:px-8">
+        <p className="font-sans text-xs text-muted">
+          © 2026 StyleYou <span className="mx-1 text-muted/80">·</span> Crafted by{" "}
+          <a
+            href="https://www.linkedin.com/in/kavitapriyadarshini"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#C9A96E] no-underline transition hover:underline"
+          >
+            Kavita Priyadarshini
+          </a>
+        </p>
+      </footer>
     </main>
   );
 }
