@@ -188,17 +188,53 @@ const initialQuiz: QuizData = {
   imageName: "",
 };
 
-function getMyntraSearchUrl(itemName: string) {
-  const keywordQuery = itemName
+function genderTermForImages(gender: string): string {
+  const g = gender.trim().toLowerCase();
+  if (g === "woman") return "women";
+  if (g === "man") return "men";
+  if (g === "non-binary" || g === "nonbinary") return "unisex";
+  return "";
+}
+
+function normalizeVibeForImages(vibe: string): string {
+  return vibe
+    .toLowerCase()
+    .replace(/&/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeBrandChunk(brands: string): string {
+  const t = brands.trim();
+  if (!t) return "";
+  return t
+    .split(/[,;/|]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** Google Images search: item + gender + vibe + optional brands */
+function getBrowseMoreImagesUrl(
+  itemName: string,
+  gender: string,
+  vibe: string,
+  brands: string,
+): string {
+  const itemKeywords = itemName
     .toLowerCase()
     .replace(/[^a-z0-9\s]/gi, " ")
     .split(/\s+/)
     .filter(Boolean)
-    .slice(0, 8)
+    .slice(0, 12)
     .join(" ");
-  const safeQuery = keywordQuery || itemName.trim() || "fashion";
-  const encoded = encodeURIComponent(safeQuery).replace(/%20/g, "+");
-  return `https://www.myntra.com/search?q=${encoded}`;
+  const itemPart = itemKeywords || itemName.trim().toLowerCase() || "fashion";
+  const genderPart = genderTermForImages(gender);
+  const vibePart = normalizeVibeForImages(vibe || "");
+  const brandPart = normalizeBrandChunk(brands || "");
+
+  const query = [itemPart, genderPart, vibePart, brandPart].filter(Boolean).join(" ");
+  return `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(query)}`;
 }
 
 function sectionCanAdvance(step: number, quiz: QuizData): boolean {
@@ -425,7 +461,7 @@ export default function Home() {
     addHeading("Wardrobe Recommendations");
     analysis.recommendations.forEach((item, index) => {
       addParagraph(
-        `${index + 1}. ${item.itemName}\nWhy it works: ${item.whyItWorks}\nStyling tip: ${item.stylingTip}\nMyntra: ${getMyntraSearchUrl(item.itemName)}`,
+        `${index + 1}. ${item.itemName}\nWhy it works: ${item.whyItWorks}\nStyling tip: ${item.stylingTip}\nGoogle Images: ${getBrowseMoreImagesUrl(item.itemName, quiz.gender, quiz.vibe, quiz.brands)}`,
       );
     });
 
@@ -469,11 +505,12 @@ export default function Home() {
             <p className="mb-4 font-sans text-xs font-medium uppercase tracking-[0.2em] text-accent">
               StyleYou
             </p>
-            <h1 className="mb-4 text-4xl leading-tight tracking-tight text-accent-dark sm:text-5xl md:text-6xl">
-              Your Personal AI Stylist
+            <h1 className="mb-6 text-[2rem] leading-[1.08] tracking-tight text-accent-dark sm:text-5xl sm:leading-[1.05] md:text-6xl md:leading-[1.02] lg:text-7xl">
+              Dress like the best version of you
             </h1>
-            <p className="mx-auto mb-10 max-w-xl font-sans text-lg text-muted">
-              Answer 8 questions. Get a wardrobe built for your body, skin tone, and style.
+            <p className="mx-auto mb-10 max-w-xl font-sans text-base leading-relaxed text-muted sm:text-lg">
+              Answer a few questions. Get personalised style recommendations matched to your body,
+              skin tone, and budget — for free.
             </p>
             <button
               type="button"
@@ -482,18 +519,21 @@ export default function Home() {
             >
               Start My Style Quiz →
             </button>
-            <div className="mt-10 flex flex-wrap items-center justify-center gap-2">
+            <div className="mx-auto mt-12 grid max-w-2xl grid-cols-1 gap-4 sm:max-w-none sm:grid-cols-3 sm:gap-5">
               {[
-                "Personalised for your body type",
-                "Colour-matched to your skin tone",
-                "Shop directly on Myntra",
-              ].map((t) => (
-                <span
-                  key={t}
-                  className="rounded-full border border-accent/30 bg-card px-4 py-2 font-sans text-xs text-muted"
+                { emoji: "👗", text: "Built for your body shape" },
+                { emoji: "🎨", text: "Colours that actually suit you" },
+                { emoji: "✨", text: "Style advice you can afford" },
+              ].map((item) => (
+                <div
+                  key={item.text}
+                  className="flex flex-col items-center rounded-2xl bg-[#F5F0E8] px-5 py-5 text-center shadow-md transition-transform duration-300 ease-out hover:-translate-y-0.5 hover:shadow-lg"
                 >
-                  {t}
-                </span>
+                  <span className="text-2xl" aria-hidden>
+                    {item.emoji}
+                  </span>
+                  <p className="mt-3 font-serif text-sm leading-snug text-accent-dark">{item.text}</p>
+                </div>
               ))}
             </div>
           </div>
@@ -936,12 +976,17 @@ export default function Home() {
                     </blockquote>
                     <div className="mt-auto pt-6">
                       <a
-                        href={getMyntraSearchUrl(item.itemName)}
+                        href={getBrowseMoreImagesUrl(
+                          item.itemName,
+                          quiz.gender,
+                          quiz.vibe,
+                          quiz.brands,
+                        )}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 font-sans text-sm font-semibold text-white transition hover:brightness-105"
                       >
-                        Browse on Myntra →
+                        Browse More →
                       </a>
                     </div>
                   </div>
